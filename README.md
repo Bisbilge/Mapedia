@@ -65,10 +65,21 @@ Responses are JSON. Every venue includes coordinates, category, and available me
 | Layer | Technology |
 |---|---|
 | Backend | Django, Django REST Framework |
-| Frontend | React, Leaflet |
+| Frontend | React, Vite, Leaflet |
 | Database | PostgreSQL |
 | Server | Hetzner (Germany, EU) |
 | Geodata source | OpenStreetMap (ODbL) |
+
+---
+
+## Repositories
+
+Mapedia is split across two repositories:
+
+| | |
+|---|---|
+| **Backend** (this repo) | Django API, data models, bot system, moderation |
+| **Frontend** | [github.com/Bisbilge/Mapedia-frontend](https://github.com/Bisbilge/Mapedia-frontend) — React/Vite web app |
 
 ---
 
@@ -101,6 +112,8 @@ python manage.py migrate
 python manage.py runserver
 ```
 
+For the frontend, see the [frontend repository](https://github.com/Bisbilge/Mapedia-frontend).
+
 ---
 
 ## Contributing
@@ -109,7 +122,10 @@ The platform is only as useful as its data. If you know a place well enough to d
 
 [Create an account](https://mapedia.org/register) to start contributing, or browse existing categories to see what has already been mapped.
 
-Code contributions are welcome. Open an issue before submitting a pull request for significant changes.
+Code contributions are welcome across both repositories. Open an issue before submitting a pull request for significant changes.
+
+- **Backend issues & PRs:** [github.com/Bisbilge/Mapedia/issues](https://github.com/Bisbilge/Mapedia/issues)
+- **Frontend issues & PRs:** [github.com/Bisbilge/Mapedia-frontend/issues](https://github.com/Bisbilge/Mapedia-frontend/issues)
 
 ---
 
