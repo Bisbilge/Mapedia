@@ -5,10 +5,12 @@ from django.conf.urls.static import static
 from django.contrib.sitemaps.views import sitemap, index as sitemap_index
 from apps.venues.sitemaps import VenueSitemap
 from apps.categories.sitemaps import CategorySitemap
+from apps.static_pages.sitemaps import StaticPagesSitemap
 
 sitemaps = {
     'venues': VenueSitemap,
     'categories': CategorySitemap,
+    'static': StaticPagesSitemap,
 }
 
 urlpatterns = [
