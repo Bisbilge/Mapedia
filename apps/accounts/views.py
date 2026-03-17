@@ -26,22 +26,27 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
     def perform_create(self, serializer):
+        import logging
+        logger = logging.getLogger(__name__)
         user = serializer.save()
         token_obj = EmailVerificationToken.objects.create(user=user)
         verify_url = f"https://mapedia.org/verify-email?token={token_obj.token}"
-        send_mail(
-            subject="Verify your Mapedia account",
-            message=(
-                f"Hi {user.username},\n\n"
-                f"Please verify your email address by clicking the link below:\n\n"
-                f"{verify_url}\n\n"
-                f"If you didn't create an account, you can ignore this email.\n\n"
-                f"— Mapedia Team"
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        try:
+            send_mail(
+                subject="Verify your Mapedia account",
+                message=(
+                    f"Hi {user.username},\n\n"
+                    f"Please verify your email address by clicking the link below:\n\n"
+                    f"{verify_url}\n\n"
+                    f"If you didn't create an account, you can ignore this email.\n\n"
+                    f"— Mapedia Team"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception:
+            logger.exception("Verification email failed for user %s", user.username)
 
 
 @method_decorator(ratelimit(key='ip', rate='10/h', method='GET', block=True), name='get')

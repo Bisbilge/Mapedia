@@ -10,7 +10,7 @@ class VenueSitemap(Sitemap):
         return Venue.objects.filter(is_active=True, is_approved=True)
 
     def location(self, obj):
-        return f'/venue/{obj.slug}'
+        return f'/venue/{obj.slug}/'
 
     # BÜYÜK SEO DOKUNUŞU: Google'a son güncellenme tarihini veriyoruz
     def lastmod(self, obj):

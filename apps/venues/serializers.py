@@ -395,7 +395,7 @@ class VenueDetailSerializer(serializers.ModelSerializer):
                 "latitude": str(obj.latitude),
                 "longitude": str(obj.longitude)
             },
-            "url": f"https://mapedia.org/venue/{obj.slug}",
+            "url": f"https://mapedia.org/venue/{obj.slug}/",
         }
         
         # Rating varsa schema'ya ekle

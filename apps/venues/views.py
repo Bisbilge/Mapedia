@@ -558,7 +558,7 @@ class VenueSSRView(View):
             page_title = f"{venue.name} — {category_name} | Mapedia"
 
         # Canonical URL
-        canonical_url = f"https://mapedia.org/venue/{venue.slug}"
+        canonical_url = f"https://mapedia.org/venue/{venue.slug}/"
 
         # JSON-LD (LocalBusiness schema)
         schema = {
