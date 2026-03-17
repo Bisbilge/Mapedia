@@ -10,7 +10,7 @@ class CategorySitemap(Sitemap):
         return Category.objects.filter(is_active=True)
 
     def location(self, obj):
-        return f'/category/{obj.slug}'
+        return f'/category/{obj.slug}/'
 
     # BÜYÜK SEO DOKUNUŞU: Kategori en son ne zaman güncellendi?
     def lastmod(self, obj):

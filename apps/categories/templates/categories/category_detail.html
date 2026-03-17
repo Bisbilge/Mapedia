@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="language" content="en" />
+
+  <title>{{ page_title }}</title>
+  <meta name="description" content="{{ meta_description }}" />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="canonical" href="{{ canonical_url }}" />
+
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="Mapedia" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="{{ page_title }}" />
+  <meta property="og:description" content="{{ meta_description }}" />
+  <meta property="og:url" content="{{ canonical_url }}" />
+  <meta property="og:image" content="https://mapedia.org/og-image.png" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{{ page_title }}" />
+  <meta name="twitter:description" content="{{ meta_description }}" />
+  <meta name="twitter:image" content="https://mapedia.org/og-image.png" />
+
+  <!-- Icons / PWA -->
+  <link rel="icon" type="image/svg+xml" href="/mapedia.svg" />
+  <link rel="apple-touch-icon" href="/mapedia.svg" />
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- JSON-LD: CollectionPage schema -->
+  <script type="application/ld+json">{{ schema_json }}</script>
+
+  <!-- Analytics -->
+  <script async src="https://analytics.mapedia.org/script.js" data-website-id="4e2fe89b-33bf-43c0-a250-aa792543a780"></script>
+
+  <!-- React / Vite assets -->
+  {{ vite_assets }}
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

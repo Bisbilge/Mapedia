@@ -1,4 +1,10 @@
+import json
+
+from django.http import Http404
+from django.shortcuts import render
+from django.views import View
 from rest_framework import viewsets, filters, permissions, status
+from apps.venues.models import Venue
 from .models import Category, FieldDefinition, FieldChoice
 from .serializers import (
     CategoryListSerializer, CategoryDetailSerializer,
@@ -329,3 +335,60 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(serializer.errors, status=400)
         serializer.save()
         return Response(CategoryDetailSerializer(serializer.instance).data)
+
+# ============ SSR VIEW ============
+
+class CategorySSRView(View):
+    """
+    /category/<slug>/ — Django SSR.
+    Google için category-specific meta/JSON-LD döner,
+    React SPA üstüne hydrate eder.
+    """
+
+    def get(self, request, slug):
+        from apps.venues.views import _get_vite_assets
+
+        category = Category.objects.filter(slug=slug, is_active=True).first()
+        if category is None:
+            raise Http404
+
+        venue_count = Venue.objects.filter(
+            venue_categories__category=category,
+            venue_categories__is_approved=True,
+            is_approved=True,
+            is_active=True,
+        ).distinct().count()
+
+        canonical_url = f"https://mapedia.org/category/{category.slug}/"
+
+        if category.description:
+            meta_description = (
+                f"{category.description[:150].rstrip()} — "
+                f"{venue_count} verified venues on Mapedia."
+            )
+        else:
+            meta_description = (
+                f"Explore {venue_count} verified {category.name} venues on Mapedia. "
+                f"Community-built open data, free to use under CC BY-SA 4.0."
+            )
+
+        page_title = f"{category.name} — {venue_count} Venues | Mapedia"
+
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": f"{category.name} — Mapedia",
+            "description": meta_description,
+            "url": canonical_url,
+        }
+
+        context = {
+            'page_title': page_title,
+            'meta_description': meta_description,
+            'canonical_url': canonical_url,
+            'category': category,
+            'venue_count': venue_count,
+            'schema_json': json.dumps(schema, ensure_ascii=False),
+            'vite_assets': _get_vite_assets(),
+        }
+        return render(request, 'categories/category_detail.html', context)

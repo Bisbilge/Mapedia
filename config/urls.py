@@ -5,6 +5,7 @@ from django.conf.urls.static import static
 from django.contrib.sitemaps.views import sitemap, index as sitemap_index
 from apps.venues.sitemaps import VenueSitemap
 from apps.venues.views import VenueSSRView
+from apps.categories.views import CategorySSRView
 from apps.categories.sitemaps import CategorySitemap
 from apps.static_pages.sitemaps import StaticPagesSitemap
 
@@ -19,6 +20,7 @@ urlpatterns = [
     path('sitemap.xml', sitemap_index, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.index'),
     path('sitemap-<section>.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path('venue/<slug:slug>/', VenueSSRView.as_view(), name='venue-ssr'),
+    path('category/<slug:slug>/', CategorySSRView.as_view(), name='category-ssr'),
     path('api/v1/', include('apps.venues.urls')),
     path('api/v1/', include('apps.categories.urls')),
     path('api/v1/', include('apps.contributions.urls')),
