@@ -1,5 +1,14 @@
 # apps/venues/views.py
 
+import json
+import re
+from functools import lru_cache
+from pathlib import Path
+
+from django.conf import settings
+from django.http import Http404
+from django.shortcuts import render
+from django.views import View
 from rest_framework import viewsets, filters, permissions, status
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.response import Response
@@ -472,3 +481,122 @@ class PublicUserRatingsView(APIView):
             'total_pages': (total_count + page_size - 1) // page_size if total_count > 0 else 1,
             'results': data
         })
+
+
+# ============ SSR VIEW ============
+
+@lru_cache(maxsize=1)
+def _get_vite_assets():
+    """
+    dist/index.html'den <script> ve <link> asset taglerini çeker.
+    lru_cache ile tek seferlik okuma — deploy sonrası process restart ile yenilenir.
+    """
+    dist_index = Path(settings.VITE_DIST_DIR) / 'index.html'
+    try:
+        html = dist_index.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return ''
+
+    tags = []
+    # <link rel="modulepreload"> ve <link rel="stylesheet">
+    for m in re.finditer(r'<link [^>]+>', html):
+        tag = m.group(0)
+        if 'modulepreload' in tag or 'stylesheet' in tag:
+            tags.append(tag)
+    # <script type="module">
+    for m in re.finditer(r'<script [^>]+></script>', html):
+        tags.append(m.group(0))
+
+    return '\n  '.join(tags)
+
+
+class VenueSSRView(View):
+    """
+    /venue/<slug>/ — Django SSR.
+    Google için venue-specific meta/JSON-LD döner,
+    React SPA üstüne hydrate eder.
+    """
+
+    def get(self, request, slug):
+        venue = (
+            Venue.objects
+            .prefetch_related('venue_categories__category')
+            .filter(slug=slug, is_approved=True, is_active=True)
+            .first()
+        )
+        if venue is None:
+            raise Http404
+
+        # Birincil kategori
+        primary_vc = (
+            venue.venue_categories
+            .filter(is_approved=True)
+            .select_related('category')
+            .first()
+        )
+        category_name = primary_vc.category.name if primary_vc else 'Place'
+        category_slug = primary_vc.category.slug if primary_vc else ''
+
+        # Meta description
+        location_parts = [p for p in [venue.city, venue.country] if p]
+        location_str = ', '.join(location_parts)
+        if location_str:
+            meta_description = (
+                f"{venue.name} is a {category_name} in {location_str}. "
+                f"View details, ratings, and community information on Mapedia."
+            )
+        else:
+            meta_description = (
+                f"{venue.name} — {category_name}. "
+                f"View details, ratings, and community information on Mapedia."
+            )
+
+        # Page title
+        if location_str:
+            page_title = f"{venue.name} — {category_name} in {location_str} | Mapedia"
+        else:
+            page_title = f"{venue.name} — {category_name} | Mapedia"
+
+        # Canonical URL
+        canonical_url = f"https://mapedia.org/venue/{venue.slug}"
+
+        # JSON-LD (LocalBusiness schema)
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "LocalBusiness",
+            "name": venue.name,
+            "url": canonical_url,
+        }
+        if venue.city or venue.country:
+            schema["address"] = {
+                "@type": "PostalAddress",
+                **({"addressLocality": venue.city} if venue.city else {}),
+                **({"addressCountry": venue.country} if venue.country else {}),
+            }
+        if venue.latitude and venue.longitude:
+            schema["geo"] = {
+                "@type": "GeoCoordinates",
+                "latitude": str(venue.latitude),
+                "longitude": str(venue.longitude),
+            }
+        if venue.rating_count and venue.rating_count > 0:
+            schema["aggregateRating"] = {
+                "@type": "AggregateRating",
+                "ratingValue": str(venue.average_rating),
+                "ratingCount": venue.rating_count,
+                "bestRating": "5",
+                "worstRating": "1",
+            }
+
+        context = {
+            'page_title': page_title,
+            'meta_description': meta_description,
+            'canonical_url': canonical_url,
+            'venue': venue,
+            'category_name': category_name,
+            'category_slug': category_slug,
+            'location_str': location_str,
+            'schema_json': json.dumps(schema, ensure_ascii=False),
+            'vite_assets': _get_vite_assets(),
+        }
+        return render(request, 'venues/venue_detail.html', context)

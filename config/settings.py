@@ -28,6 +28,9 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='').split(',')
+# Capacitor mobile app
+if 'https://localhost' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://localhost')
 
 # ── APPS ───────────────────────────────────────────────────────
 INSTALLED_APPS = [
@@ -141,6 +144,12 @@ CORS_ALLOWED_ORIGINS = config(
     default='http://localhost:5173'
 ).split(',')
 
+# Capacitor Android/iOS app origin (always allowed)
+if 'https://localhost' not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append('https://localhost')
+if 'capacitor://localhost' not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append('capacitor://localhost')
+
 # ── EMAIL (Resend API) ──────────────────────────────────────────
 EMAIL_BACKEND = 'anymail.backends.resend.EmailBackend'
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Mapedia <info@mapedia.org>')
@@ -204,3 +213,7 @@ LOGGING = {
 }
 
 SITE_ID = 1
+
+# ── VITE FRONTEND ──────────────────────────────────────────────
+# dist/index.html'den asset taglerini okumak için kullanılır.
+VITE_DIST_DIR = config('VITE_DIST_DIR', default=str(BASE_DIR.parent.parent / 'frontend' / 'dist'))
