@@ -184,6 +184,8 @@ AXES_IPWARE_META_PRECEDENCE_ORDER = [
     'HTTP_X_FORWARDED_FOR',
     'REMOTE_ADDR',
 ]
+# Cloudflare + nginx = 1 trusted proxy; take leftmost (real user) IP
+AXES_PROXY_COUNT = 1
 
 # ── LOGGING ────────────────────────────────────────────────────
 # Sentry entegrasyonu için INFO seviyesi idealdir.
