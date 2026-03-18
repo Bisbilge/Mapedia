@@ -369,31 +369,55 @@ class FeedView(APIView):
         ).values_list('venue_id', flat=True).distinct()
 
         from apps.venues.models import Venue
+        from django.db.models import Prefetch
+        from apps.categories.models import FieldValue
+
         venues = Venue.objects.filter(
             id__in=venue_ids,
             is_approved=True,
             is_active=True,
-        ).prefetch_related('venue_categories__category').order_by('-created_at')
+        ).prefetch_related(
+            Prefetch(
+                'venue_categories',
+                queryset=VenueCategory.objects.filter(is_approved=True)
+                    .select_related('category')
+                    .prefetch_related('field_values__field'),
+            )
+        ).order_by('-created_at')
 
         total = venues.count()
         start = (page - 1) * page_size
         page_venues = venues[start:start + page_size]
 
+        followed_set = set(followed_category_ids)
         results = []
         for v in page_venues:
-            cats = [
-                {'name': vc.category.name, 'slug': vc.category.slug, 'icon': vc.category.icon}
-                for vc in v.venue_categories.filter(is_approved=True).select_related('category')
-                if vc.category_id in followed_category_ids
-            ]
+            cats = []
+            field_values = []
+            for vc in v.venue_categories.all():
+                if not vc.is_approved:
+                    continue
+                if vc.category_id in followed_set:
+                    cats.append({'name': vc.category.name, 'slug': vc.category.slug, 'icon': vc.category.icon})
+                for fv in vc.field_values.all():
+                    if fv.field.is_public:
+                        field_values.append({
+                            'label': fv.field.label,
+                            'value': fv.get_display_value(),
+                            'type': fv.field.field_type,
+                        })
             results.append({
                 'id': v.id,
                 'name': v.name,
                 'slug': v.slug,
                 'city': v.city,
                 'country': v.country,
+                'description': v.description or '',
                 'created_at': v.created_at.isoformat(),
                 'categories': cats,
+                'field_values': field_values,
+                'average_rating': v.average_rating,
+                'rating_count': v.rating_count,
             })
 
         return Response({
