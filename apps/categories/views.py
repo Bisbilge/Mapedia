@@ -356,9 +356,9 @@ class FeedView(APIView):
         page = int(request.query_params.get('page', 1))
         page_size = 20
 
-        followed_category_ids = CategoryFollow.objects.filter(
+        followed_category_ids = list(CategoryFollow.objects.filter(
             user=request.user
-        ).values_list('category_id', flat=True)
+        ).values_list('category_id', flat=True))
 
         if not followed_category_ids:
             return Response({'results': [], 'has_more': False, 'followed_count': 0})
@@ -412,7 +412,7 @@ class FeedView(APIView):
                 'slug': v.slug,
                 'city': v.city,
                 'country': v.country,
-                'description': v.description or '',
+                'description': '',
                 'created_at': v.created_at.isoformat(),
                 'categories': cats,
                 'field_values': field_values,
@@ -423,7 +423,7 @@ class FeedView(APIView):
         return Response({
             'results': results,
             'has_more': (start + page_size) < total,
-            'followed_count': len(followed_category_ids),
+            'followed_count': len(followed_category_ids),  # already a list
         })
 
 
