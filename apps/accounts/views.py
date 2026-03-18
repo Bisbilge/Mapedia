@@ -388,6 +388,67 @@ class DeleteAccountView(APIView):
         return Response({'detail': 'Account deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
 
 
+class GoogleLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+        from django.conf import settings
+
+        credential = request.data.get('credential')
+        if not credential:
+            return Response({'detail': 'credential required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            idinfo = id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID,
+            )
+        except ValueError:
+            return Response({'detail': 'Invalid Google token.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        email = idinfo.get('email')
+        if not email:
+            return Response({'detail': 'Email not found in token.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Kullanıcıyı bul veya oluştur
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                'username': _google_username(email),
+                'is_active': True,
+            }
+        )
+
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=['is_active'])
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user': {
+                'username': user.username,
+                'email': user.email,
+            },
+            'created': created,
+        })
+
+
+def _google_username(email):
+    """Email'den benzersiz username üret."""
+    base = email.split('@')[0].replace('.', '_').replace('-', '_')[:20]
+    username = base
+    n = 1
+    while User.objects.filter(username=username).exists():
+        username = f"{base}{n}"
+        n += 1
+    return username
+
+
 class UserStatsView(APIView):
     permission_classes = [permissions.AllowAny]
 

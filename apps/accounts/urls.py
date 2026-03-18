@@ -12,6 +12,7 @@ from .views import (
     UserStatsView,
     UserSearchView,
     UserListView,
+    GoogleLoginView,
 )
 
 urlpatterns = [
@@ -19,6 +20,7 @@ urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/google/', GoogleLoginView.as_view(), name='google-login'),
     path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
     path('auth/profile/', ProfileView.as_view(), name='profile'),
     path('auth/delete-account/', DeleteAccountView.as_view(), name='delete-account'),
