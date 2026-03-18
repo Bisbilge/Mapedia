@@ -39,46 +39,54 @@ class FieldDefinitionSerializer(serializers.ModelSerializer):
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
-    """Kategori listesi için serializer - venue_count, field_count dahil"""
-    venue_count = serializers.SerializerMethodField()
-    field_count = serializers.SerializerMethodField()
+    venue_count    = serializers.SerializerMethodField()
+    field_count    = serializers.SerializerMethodField()
     owner_username = serializers.SerializerMethodField()
+    follower_count = serializers.SerializerMethodField()
+    is_following   = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
         fields = [
             'id', 'name', 'slug', 'description', 'icon',
-            'venue_count', 'field_count', 'owner_username'
+            'venue_count', 'field_count', 'owner_username',
+            'follower_count', 'is_following',
         ]
 
     def get_venue_count(self, obj):
-        """Onaylı venue sayısı"""
         return obj.venue_categories.filter(is_approved=True).count()
 
     def get_field_count(self, obj):
-        """Field definition sayısı"""
         return obj.field_definitions.count()
 
     def get_owner_username(self, obj):
-        """Kategori sahibinin kullanıcı adı"""
-        if obj.owner:
-            return obj.owner.username
-        return None
+        return obj.owner.username if obj.owner else None
+
+    def get_follower_count(self, obj):
+        return obj.followers.count()
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.followers.filter(user=request.user).exists()
+        return False
 
 
 class CategoryDetailSerializer(serializers.ModelSerializer):
     field_definitions = FieldDefinitionSerializer(many=True, read_only=True)
-    owner = serializers.SerializerMethodField()
-    moderators = serializers.SerializerMethodField()
-    venue_count = serializers.SerializerMethodField()
-    field_count = serializers.SerializerMethodField()
+    owner          = serializers.SerializerMethodField()
+    moderators     = serializers.SerializerMethodField()
+    venue_count    = serializers.SerializerMethodField()
+    field_count    = serializers.SerializerMethodField()
+    follower_count = serializers.SerializerMethodField()
+    is_following   = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
         fields = [
             'id', 'name', 'slug', 'description', 'icon',
-            'field_definitions', 'owner', 'moderators', 
-            'venue_count', 'field_count'
+            'field_definitions', 'owner', 'moderators',
+            'venue_count', 'field_count', 'follower_count', 'is_following',
         ]
 
     def get_owner(self, obj):
@@ -94,6 +102,15 @@ class CategoryDetailSerializer(serializers.ModelSerializer):
 
     def get_field_count(self, obj):
         return obj.field_definitions.count()
+
+    def get_follower_count(self, obj):
+        return obj.followers.count()
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.followers.filter(user=request.user).exists()
+        return False
 
 
 class CategoryCreateSerializer(serializers.ModelSerializer):

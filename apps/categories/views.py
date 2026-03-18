@@ -5,7 +5,7 @@ from django.shortcuts import render
 from django.views import View
 from rest_framework import viewsets, filters, permissions, status
 from apps.venues.models import Venue
-from .models import Category, FieldDefinition, FieldChoice
+from .models import Category, FieldDefinition, FieldChoice, CategoryFollow
 from .serializers import (
     CategoryListSerializer, CategoryDetailSerializer,
     CategoryCreateSerializer, FieldDefinitionSerializer,
@@ -335,6 +335,73 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(serializer.errors, status=400)
         serializer.save()
         return Response(CategoryDetailSerializer(serializer.instance).data)
+
+    @action(detail=True, methods=['post'], url_path='follow', permission_classes=[permissions.IsAuthenticated])
+    def follow(self, request, slug=None):
+        category = self.get_object()
+        follow, created = CategoryFollow.objects.get_or_create(user=request.user, category=category)
+        if not created:
+            follow.delete()
+            return Response({'following': False, 'follower_count': category.followers.count()})
+        return Response({'following': True, 'follower_count': category.followers.count()})
+
+
+from rest_framework.views import APIView
+from apps.venues.models import VenueCategory
+
+class FeedView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        page = int(request.query_params.get('page', 1))
+        page_size = 20
+
+        followed_category_ids = CategoryFollow.objects.filter(
+            user=request.user
+        ).values_list('category_id', flat=True)
+
+        if not followed_category_ids:
+            return Response({'results': [], 'has_more': False, 'followed_count': 0})
+
+        venue_ids = VenueCategory.objects.filter(
+            category_id__in=followed_category_ids,
+            is_approved=True,
+        ).values_list('venue_id', flat=True).distinct()
+
+        from apps.venues.models import Venue
+        venues = Venue.objects.filter(
+            id__in=venue_ids,
+            is_approved=True,
+            is_active=True,
+        ).prefetch_related('venue_categories__category').order_by('-created_at')
+
+        total = venues.count()
+        start = (page - 1) * page_size
+        page_venues = venues[start:start + page_size]
+
+        results = []
+        for v in page_venues:
+            cats = [
+                {'name': vc.category.name, 'slug': vc.category.slug, 'icon': vc.category.icon}
+                for vc in v.venue_categories.filter(is_approved=True).select_related('category')
+                if vc.category_id in followed_category_ids
+            ]
+            results.append({
+                'id': v.id,
+                'name': v.name,
+                'slug': v.slug,
+                'city': v.city,
+                'country': v.country,
+                'created_at': v.created_at.isoformat(),
+                'categories': cats,
+            })
+
+        return Response({
+            'results': results,
+            'has_more': (start + page_size) < total,
+            'followed_count': len(followed_category_ids),
+        })
+
 
 # ============ SSR VIEW ============
 

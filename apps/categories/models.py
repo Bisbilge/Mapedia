@@ -39,6 +39,19 @@ class Category(models.Model):
         return False
 
 
+class CategoryFollow(models.Model):
+    user     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='followed_categories')
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='followers')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'category']
+        verbose_name = _("Category Follow")
+
+    def __str__(self):
+        return f"{self.user.username} → {self.category.name}"
+
+
 class FieldDefinition(models.Model):
     FIELD_TYPES = [
         ('boolean', _('Boolean (Yes/No)')),

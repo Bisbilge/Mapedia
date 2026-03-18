@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CategoryViewSet
+from .views import CategoryViewSet, FeedView
 
 router = DefaultRouter()
 router.register(r'categories', CategoryViewSet, basename='category')
@@ -12,6 +12,7 @@ urlpatterns = [
         CategoryViewSet.as_view({'patch': 'edit_field'}),
         name='category-edit-field'
     ),
+    path('feed/', FeedView.as_view(), name='feed'),
     path(
         'categories/<slug:slug>/fields/<int:field_id>/delete/',
         CategoryViewSet.as_view({'delete': 'delete_field'}),
