@@ -372,6 +372,7 @@ class FeedView(APIView):
         from django.db.models import Prefetch
         from apps.categories.models import FieldValue
 
+        from apps.venues.models import VenueRating
         venues = Venue.objects.filter(
             id__in=venue_ids,
             is_approved=True,
@@ -382,12 +383,28 @@ class FeedView(APIView):
                 queryset=VenueCategory.objects.filter(is_approved=True)
                     .select_related('category')
                     .prefetch_related('field_values__field'),
-            )
+            ),
         ).order_by('-created_at')
 
         total = venues.count()
         start = (page - 1) * page_size
         page_venues = venues[start:start + page_size]
+
+        page_venues = list(page_venues)
+        page_venue_ids = [v.id for v in page_venues]
+
+        # Fetch up to 2 recent comments per venue in one query
+        from collections import defaultdict
+        comments_qs = VenueRating.objects.filter(
+            venue_id__in=page_venue_ids,
+            is_visible=True,
+            comment__gt='',
+        ).select_related('user').order_by('venue_id', '-created_at')
+
+        comments_by_venue = defaultdict(list)
+        for r in comments_qs:
+            if len(comments_by_venue[r.venue_id]) < 2:
+                comments_by_venue[r.venue_id].append(r)
 
         followed_set = set(followed_category_ids)
         results = []
@@ -418,6 +435,10 @@ class FeedView(APIView):
                 'field_values': field_values,
                 'average_rating': v.average_rating,
                 'rating_count': v.rating_count,
+                'preview_comments': [
+                    {'username': r.user.username, 'score': r.score, 'comment': r.comment}
+                    for r in comments_by_venue.get(v.id, [])
+                ],
             })
 
         return Response({
