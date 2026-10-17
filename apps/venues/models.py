@@ -35,6 +35,12 @@ class Venue(models.Model):
         verbose_name = _("Venue")
         verbose_name_plural = _("Venues")
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['name'], name='venue_name_idx'),
+            models.Index(fields=['city'], name='venue_city_idx'),
+            models.Index(fields=['country'], name='venue_country_idx'),
+            models.Index(fields=['is_approved', 'is_active'], name='venue_status_idx'),
+        ]
 
     def __str__(self):
         return self.name
@@ -54,13 +60,17 @@ class Venue(models.Model):
     
     @property
     def average_rating(self):
-        """Ortalama puan (1-5 arası, virgülden sonra 1 basamak)"""
+        """Ortalama puan (annotate ile gelmişse doğrudan kullanır, yoksa DB'den çeker)"""
+        if hasattr(self, 'annotated_avg_rating'):
+            return round(self.annotated_avg_rating, 1) if self.annotated_avg_rating is not None else None
         result = self.ratings.aggregate(avg=Avg('score'))
         return round(result['avg'], 1) if result['avg'] else None
 
     @property
     def rating_count(self):
-        """Toplam oy sayısı"""
+        """Toplam oy sayısı (annotate ile gelmişse doğrudan kullanır, yoksa DB'den çeker)"""
+        if hasattr(self, 'annotated_rating_count'):
+            return self.annotated_rating_count
         return self.ratings.count()
 
     def get_rating_breakdown(self):
@@ -81,8 +91,6 @@ class Venue(models.Model):
 
 
 class VenueContributor(models.Model):
-    """Mekana katkıda bulunan kullanıcılar"""
-    
     CONTRIBUTION_TYPES = [
         ('added', _('Added the place')),
         ('updated', _('Updated information')),
@@ -116,8 +124,6 @@ class VenueContributor(models.Model):
 
 
 class VenueCategory(models.Model):
-    """Mekanın ait olduğu kategoriler"""
-    
     venue = models.ForeignKey(
         Venue,
         on_delete=models.CASCADE,
@@ -141,8 +147,6 @@ class VenueCategory(models.Model):
 
 
 class VenueRating(models.Model):
-    """Kullanıcıların mekanlara verdiği yıldız puanları"""
-    
     venue = models.ForeignKey(
         Venue,
         on_delete=models.CASCADE,
@@ -166,7 +170,6 @@ class VenueRating(models.Model):
         help_text=_("Opsiyonel kısa yorum (max 500 karakter)")
     )
     
-    # Moderasyon için
     is_visible = models.BooleanField(
         default=True,
         verbose_name=_("Visible"),
@@ -179,7 +182,7 @@ class VenueRating(models.Model):
     class Meta:
         verbose_name = _("Venue Rating")
         verbose_name_plural = _("Venue Ratings")
-        unique_together = ['venue', 'user']  # Bir kullanıcı bir mekana 1 kez puan verir
+        unique_together = ['venue', 'user']
         ordering = ['-created_at']
 
     def __str__(self):
