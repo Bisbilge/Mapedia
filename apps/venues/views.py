@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
-from django.db.models import Q, Avg
+from django.db.models import Q, Avg, Count
 from .models import Venue, VenueCategory, VenueRating
 from .serializers import (
     VenueListSerializer, 
@@ -35,7 +35,7 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'city', 'country']
-    ordering_fields = ['created_at', 'name']
+    ordering_fields = ['created_at', 'name', 'annotated_avg_rating']
     lookup_field = 'slug'
     pagination_class = VenuePagination
 
@@ -79,19 +79,17 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         if min_rating:
             try:
                 min_val = float(min_rating)
-                queryset = queryset.annotate(
-                    avg_rating=Avg('ratings__score')
-                ).filter(avg_rating__gte=min_val)
+                queryset = queryset.filter(annotated_avg_rating__gte=min_val)
             except (ValueError, TypeError):
                 pass
 
         if has_ratings == 'true':
-            queryset = queryset.filter(ratings__isnull=False)
+            queryset = queryset.filter(annotated_rating_count__gt=0)
 
         # Field filters
         for key, value in request.query_params.items():
             if key.startswith('field__') and value:
-                field_name = key[7:]  # "field__" prefix'ini kaldır
+                field_name = key[7:]
                 
                 if value.lower() in ('true', 'false'):
                     queryset = queryset.filter(
@@ -118,19 +116,26 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset.distinct()
 
     def get_queryset(self):
-        queryset = self.get_base_queryset()
+        # map_markers ve count_only sorgularında ağır annotate ve prefetch işlemlerini atla
+        if self.action == 'map_markers' or self.request.query_params.get('count_only') == '1':
+            queryset = self.get_base_queryset()
+            return self.apply_filters(queryset, self.request)
+
+        # Toplu rating hesaplamasını SQL seviyesinde annotate et (N+1'i yok eder)
+        queryset = self.get_base_queryset().annotate(
+            annotated_avg_rating=Avg('ratings__score'),
+            annotated_rating_count=Count('ratings', distinct=True)
+        )
         queryset = self.apply_filters(queryset, self.request)
 
         if self.action == 'list':
-            return queryset.prefetch_related('venue_categories__category')
+            return queryset.prefetch_related(
+                'venue_categories__category',
+                'venue_categories__field_values__field',
+                'venue_categories__field_values__field__choices',
+            )
 
-        # ── retrieve için genişletilmiş prefetch ──────────────────────────
-        # nearby_venues / related_venues, serializer içinde Venue.objects
-        # sorgusu yapar; bu queryset o sorgulardan bağımsız.
-        # Ancak VenueNearbySerializer.get_primary_category_slug çağrısı
-        # her nearby/related venue için venue_categories'e gider.
-        # Bunu önlemek için Prefetch nesnesi kullanılabilir, ama
-        # serializer kendi sub-queryset'ini yönetiyor — şimdilik yeterli.
+        # retrieve için prefetch
         return queryset.prefetch_related(
             'venue_categories__category',
             'venue_categories__field_values__field',
@@ -195,23 +200,14 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='map-markers')
     def map_markers(self, request):
-        """
-        Harita için minimal venue verisi.
-        Sadece id, slug, name, latitude, longitude döner.
-        Popup verisi YOK - çok hızlı!
-        """
         queryset = self.get_base_queryset().filter(
             latitude__isnull=False,
             longitude__isnull=False
         )
-        
-        # Filtreleri uygula
         queryset = self.apply_filters(queryset, request)
-        
-        # Sadece gerekli alanları seç - VALUES ile çok hızlı
         markers = queryset.values(
             'id', 'slug', 'name', 'latitude', 'longitude'
-        )[:3000]  # Max 3000 marker
+        )[:3000]
 
         return Response(list(markers))
 
@@ -224,7 +220,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def add_category(self, request, slug=None):
-        """Venue'ya yeni kategori ekle"""
         venue = Venue.objects.filter(slug=slug).first()
         if not venue:
             return Response({'detail': 'Venue not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -267,8 +262,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         if not venue:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        from apps.categories.models import Category
-        
         can_delete = False
         for vc in venue.venue_categories.select_related('category'):
             if vc.category.can_moderate(request.user):
@@ -290,7 +283,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[permissions.AllowAny],
     )
     def get_ratings(self, request, slug=None):
-        """Venue'nun tüm rating'lerini getir"""
         venue = Venue.objects.filter(slug=slug, is_approved=True, is_active=True).first()
         if not venue:
             return Response({'detail': 'Venue not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -325,7 +317,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def rate_venue(self, request, slug=None):
-        """Venue'ya puan ver veya güncelle"""
         venue = Venue.objects.filter(slug=slug, is_approved=True, is_active=True).first()
         if not venue:
             return Response({'detail': 'Venue not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -366,7 +357,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def delete_rating(self, request, slug=None):
-        """Kullanıcının kendi rating'ini sil"""
         venue = Venue.objects.filter(slug=slug).first()
         if not venue:
             return Response({'detail': 'Venue not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -386,7 +376,6 @@ class VenueViewSet(viewsets.ReadOnlyModelViewSet):
 # ============ STANDALONE RATING VIEWS ============
 
 class UserRatingsView(APIView):
-    """Kullanıcının verdiği tüm puanları listele"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -432,7 +421,6 @@ class UserRatingsView(APIView):
 
 
 class PublicUserRatingsView(APIView):
-    """Herhangi bir kullanıcının verdiği puanları görüntüle (public)"""
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, username):
@@ -487,10 +475,6 @@ class PublicUserRatingsView(APIView):
 
 @lru_cache(maxsize=1)
 def _get_vite_assets():
-    """
-    dist/index.html'den <script> ve <link> asset taglerini çeker.
-    lru_cache ile tek seferlik okuma — deploy sonrası process restart ile yenilenir.
-    """
     dist_index = Path(settings.VITE_DIST_DIR) / 'index.html'
     try:
         html = dist_index.read_text(encoding='utf-8')
@@ -498,12 +482,10 @@ def _get_vite_assets():
         return ''
 
     tags = []
-    # <link rel="modulepreload"> ve <link rel="stylesheet">
     for m in re.finditer(r'<link [^>]+>', html):
         tag = m.group(0)
         if 'modulepreload' in tag or 'stylesheet' in tag:
             tags.append(tag)
-    # <script type="module">
     for m in re.finditer(r'<script [^>]+></script>', html):
         tags.append(m.group(0))
 
@@ -511,12 +493,6 @@ def _get_vite_assets():
 
 
 class VenueSSRView(View):
-    """
-    /venue/<slug>/ — Django SSR.
-    Google için venue-specific meta/JSON-LD döner,
-    React SPA üstüne hydrate eder.
-    """
-
     def get(self, request, slug):
         venue = (
             Venue.objects
@@ -527,7 +503,6 @@ class VenueSSRView(View):
         if venue is None:
             raise Http404
 
-        # Birincil kategori
         primary_vc = (
             venue.venue_categories
             .filter(is_approved=True)
@@ -537,7 +512,6 @@ class VenueSSRView(View):
         category_name = primary_vc.category.name if primary_vc else 'Place'
         category_slug = primary_vc.category.slug if primary_vc else ''
 
-        # Meta description
         location_parts = [p for p in [venue.city, venue.country] if p]
         location_str = ', '.join(location_parts)
         if location_str:
@@ -551,16 +525,13 @@ class VenueSSRView(View):
                 f"View details, ratings, and community information on Mapedia."
             )
 
-        # Page title
         if location_str:
             page_title = f"{venue.name} — {category_name} in {location_str} | Mapedia"
         else:
             page_title = f"{venue.name} — {category_name} | Mapedia"
 
-        # Canonical URL
         canonical_url = f"https://mapedia.org/venue/{venue.slug}/"
 
-        # JSON-LD (LocalBusiness schema)
         schema = {
             "@context": "https://schema.org",
             "@type": "LocalBusiness",
