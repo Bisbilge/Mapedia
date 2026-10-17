@@ -8,7 +8,6 @@ import json
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
-    """Choice seçenekleri için serializer"""
     class Meta:
         model = FieldChoice
         fields = ['id', 'value', 'label', 'icon', 'order']
@@ -30,64 +29,50 @@ class FieldValueSerializer(serializers.ModelSerializer):
         ]
 
     def get_display_value(self, obj):
-        """Kullanıcıya gösterilecek değer (label'lar)"""
         if obj.field.field_type == 'boolean':
-            if obj.value.lower() in ('true', '1', 'yes'):
+            if str(obj.value).lower() in ('true', '1', 'yes'):
                 return 'Yes'
-            elif obj.value.lower() in ('false', '0', 'no'):
+            elif str(obj.value).lower() in ('false', '0', 'no'):
                 return 'No'
             return 'Unknown'
 
         elif obj.field.field_type == 'choice':
-            try:
-                choice = obj.field.choices.get(value=obj.value, is_active=True)
-                return choice.label
-            except FieldChoice.DoesNotExist:
-                return obj.value
+            choices = [c for c in obj.field.choices.all() if c.is_active and c.value == obj.value]
+            return choices[0].label if choices else obj.value
 
         elif obj.field.field_type == 'multi_choice':
             try:
                 values = json.loads(obj.value)
             except (json.JSONDecodeError, TypeError):
-                values = [v.strip() for v in obj.value.split(',') if v.strip()]
+                values = [v.strip() for v in str(obj.value).split(',') if v.strip()]
 
-            labels = []
-            for val in values:
-                try:
-                    choice = obj.field.choices.get(value=val, is_active=True)
-                    labels.append(choice.label)
-                except FieldChoice.DoesNotExist:
-                    labels.append(val)
+            active_choices = {c.value: c.label for c in obj.field.choices.all() if c.is_active}
+            labels = [active_choices.get(val, val) for val in values]
             return ', '.join(labels)
 
         return obj.value
 
     def get_selected_choices(self, obj):
-        """Choice/multi_choice için seçili choice nesneleri"""
         if obj.field.field_type not in ('choice', 'multi_choice'):
             return None
 
         if obj.field.field_type == 'choice':
-            try:
-                choice = obj.field.choices.get(value=obj.value, is_active=True)
-                return [FieldChoiceSerializer(choice).data]
-            except FieldChoice.DoesNotExist:
-                return []
+            choices = [c for c in obj.field.choices.all() if c.is_active and c.value == obj.value]
+            return [FieldChoiceSerializer(choices[0]).data] if choices else []
 
         elif obj.field.field_type == 'multi_choice':
             try:
                 values = json.loads(obj.value)
             except (json.JSONDecodeError, TypeError):
-                values = [v.strip() for v in obj.value.split(',') if v.strip()]
+                values = [v.strip() for v in str(obj.value).split(',') if v.strip()]
 
-            choices = obj.field.choices.filter(value__in=values, is_active=True)
+            choices = [c for c in obj.field.choices.all() if c.is_active and c.value in values]
             return FieldChoiceSerializer(choices, many=True).data
 
         return None
 
 
 class VenueCategorySerializer(serializers.ModelSerializer):
-    """One category membership with its field values."""
     category_name = serializers.CharField(source='category.name', read_only=True)
     category_slug = serializers.CharField(source='category.slug', read_only=True)
     field_values = FieldValueSerializer(many=True, read_only=True)
@@ -100,7 +85,6 @@ class VenueCategorySerializer(serializers.ModelSerializer):
 # ============ RATING SERIALIZERS ============
 
 class VenueRatingUserSerializer(serializers.Serializer):
-    """Rating içindeki kullanıcı bilgisi"""
     id = serializers.IntegerField()
     username = serializers.CharField()
     avatar = serializers.SerializerMethodField()
@@ -115,7 +99,6 @@ class VenueRatingUserSerializer(serializers.Serializer):
 
 
 class VenueRatingSerializer(serializers.ModelSerializer):
-    """Rating okuma için serializer"""
     user = serializers.SerializerMethodField()
 
     class Meta:
@@ -142,8 +125,6 @@ class VenueRatingSerializer(serializers.ModelSerializer):
 
 
 class VenueRatingCreateSerializer(serializers.ModelSerializer):
-    """Rating oluşturma/güncelleme için serializer"""
-    
     class Meta:
         model = VenueRating
         fields = ['score', 'comment']
@@ -160,7 +141,6 @@ class VenueRatingCreateSerializer(serializers.ModelSerializer):
 
 
 class VenueRatingDetailSerializer(serializers.ModelSerializer):
-    """Rating detay (venue bilgisiyle birlikte)"""
     user = serializers.SerializerMethodField()
     venue = serializers.SerializerMethodField()
 
@@ -191,7 +171,6 @@ class VenueRatingDetailSerializer(serializers.ModelSerializer):
 # ============ VENUE SERIALIZERS ============
 
 class VenueMapSerializer(serializers.ModelSerializer):
-    """Harita için minimal venue bilgisi"""
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
 
@@ -207,7 +186,6 @@ class VenueMapSerializer(serializers.ModelSerializer):
 
 
 class VenueListSerializer(serializers.ModelSerializer):
-    """Venue listesi için serializer"""
     categories = VenueCategorySerializer(source='venue_categories', many=True, read_only=True)
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
@@ -228,14 +206,7 @@ class VenueListSerializer(serializers.ModelSerializer):
         return obj.rating_count
 
 
-# ─────────────────────────────────────────────
-# SEO: Nearby / Related venue'lar için minimal serializer.
-# VenueDetailSerializer içinde kullanılır.
-# primary_category_slug: RelatedVenues bileşenindeki
-# "Browse all X venues →" linkini oluşturmak için gerekli.
-# ─────────────────────────────────────────────
 class VenueNearbySerializer(serializers.ModelSerializer):
-    """nearby_venues ve related_venues için minimal serializer."""
     primary_category_slug = serializers.SerializerMethodField()
 
     class Meta:
@@ -243,28 +214,20 @@ class VenueNearbySerializer(serializers.ModelSerializer):
         fields = ['slug', 'name', 'city', 'average_rating', 'primary_category_slug']
 
     def get_primary_category_slug(self, obj):
-        # venue_categories__category prefetch varsa DB'ye gitme
-        vc = obj.venue_categories.filter(is_approved=True).select_related('category').first()
-        return vc.category.slug if vc else None
+        approved = [vc for vc in obj.venue_categories.all() if vc.is_approved]
+        return approved[0].category.slug if approved else None
 
 
 class VenueDetailSerializer(serializers.ModelSerializer):
-    """Venue detay sayfası için serializer"""
     categories = VenueCategorySerializer(source='venue_categories', many=True, read_only=True)
     schema_data = serializers.SerializerMethodField()
     contributors = serializers.SerializerMethodField()
     
-    # Rating bilgileri
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
     rating_breakdown = serializers.SerializerMethodField()
     recent_ratings = serializers.SerializerMethodField()
 
-    # ── SEO: İç linkleme alanları ──────────────────────────────────────
-    # nearby_venues:  aynı şehir + aynı birincil kategori → coğrafi küme
-    # related_venues: aynı kategori + farklı şehir       → tematik küme
-    # Her ikisi de max 6 kayıt, rating'e göre sıralı.
-    # Frontend'de NearbyVenues ve RelatedVenues bileşenleri render eder.
     nearby_venues = serializers.SerializerMethodField()
     related_venues = serializers.SerializerMethodField()
 
@@ -289,30 +252,17 @@ class VenueDetailSerializer(serializers.ModelSerializer):
         return obj.rating_count
 
     def get_rating_breakdown(self, obj):
-        """Her yıldız için kaç oy var"""
         return obj.get_rating_breakdown()
 
     def get_recent_ratings(self, obj):
-        """Son 5 rating"""
         ratings = obj.ratings.filter(is_visible=True).select_related('user__profile').order_by('-created_at')[:5]
         return VenueRatingSerializer(ratings, many=True, context=self.context).data
 
     def _get_primary_category(self, obj):
-        """İlk onaylı kategoriyi döner (nearby/related hesaplamada ortak kullanım)."""
-        return (
-            obj.venue_categories
-            .filter(is_approved=True)
-            .select_related('category')
-            .first()
-        )
+        approved = [vc for vc in obj.venue_categories.all() if vc.is_approved]
+        return approved[0] if approved else None
 
     def get_nearby_venues(self, obj):
-        """
-        Aynı şehir + aynı birincil kategori, max 6 mekan.
-        Şehir yoksa boş liste döner.
-        distinct() + annotate ORDER BY çakışmasını önlemek için
-        subquery pattern: önce id'leri al, sonra sırala.
-        """
         if not obj.city:
             return []
 
@@ -330,9 +280,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
                 venue_categories__is_approved=True,
             )
 
-        # distinct() + annotate ORDER BY çakışmasını önle:
-        # 1. id listesini distinct ile al
-        # 2. annotate + order_by'ı temiz queryset'te uygula
         venue_ids = qs.values_list('id', flat=True).distinct()
         qs = (
             Venue.objects
@@ -345,10 +292,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
         return VenueNearbySerializer(qs, many=True).data
 
     def get_related_venues(self, obj):
-        """
-        Aynı birincil kategori + farklı şehir, max 6 mekan.
-        Şehri olmayan venue'ları da dahil eder.
-        """
         primary_vc = self._get_primary_category(obj)
         if not primary_vc:
             return []
@@ -367,7 +310,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
         if obj.city:
             qs = qs.exclude(city__iexact=obj.city)
 
-        # Aynı pattern: id subquery → temiz annotate
         venue_ids = qs.values_list('id', flat=True).distinct()
         qs = (
             Venue.objects
@@ -380,7 +322,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
         return VenueNearbySerializer(qs, many=True).data
 
     def get_schema_data(self, obj):
-        """Google Rich Results için JSON-LD"""
         schema = {
             "@context": "https://schema.org",
             "@type": "Place",
@@ -398,8 +339,7 @@ class VenueDetailSerializer(serializers.ModelSerializer):
             "url": f"https://mapedia.org/venue/{obj.slug}/",
         }
         
-        # Rating varsa schema'ya ekle
-        if obj.rating_count > 0:
+        if obj.rating_count and obj.rating_count > 0:
             schema["aggregateRating"] = {
                 "@type": "AggregateRating",
                 "ratingValue": str(obj.average_rating),
@@ -414,7 +354,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
         unique_users = set()
         contributors_data = []
 
-        # 1. VenueContributor tablosundan
         if hasattr(obj, 'contributors'):
             for contrib in obj.contributors.select_related('user'):
                 if contrib.user:
@@ -423,7 +362,6 @@ class VenueDetailSerializer(serializers.ModelSerializer):
                         unique_users.add(username)
                         contributors_data.append({'username': username})
 
-        # 2. Contribution tablosundan
         from apps.contributions.models import Contribution
         approved_contributions = Contribution.objects.filter(
             venue=obj,
