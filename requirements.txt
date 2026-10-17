@@ -15,3 +15,5 @@ sentry-sdk
 redis
 gunicorn
 whitenoise
+django-extensions
+django-axes
