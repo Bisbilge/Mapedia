@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.tox/
+.nox/
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env/
+
+# Environment variables
+.env
+*.env
+.env.local
+.env.production
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+db.sqlite3
+
+# Node
+node_modules/
+dist/
+.pnp
+.pnp.js
+
+# Vite / React build
+frontend/dist/
+librespot-frontend/dist/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Certificates
+*.pem
+*.key
+*.crt

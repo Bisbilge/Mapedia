@@ -1,0 +1,32 @@
+from django.contrib import admin
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from django.http import HttpResponse
+from django.contrib.sitemaps.views import sitemap, index as sitemap_index
+from apps.venues.sitemaps import VenueSitemap
+from apps.venues.views import VenueSSRView
+from apps.categories.views import CategorySSRView
+from apps.categories.sitemaps import CategorySitemap
+from apps.static_pages.sitemaps import StaticPagesSitemap
+
+sitemaps = {
+    'venues': VenueSitemap,
+    'categories': CategorySitemap,
+    'static': StaticPagesSitemap,
+}
+
+urlpatterns = [
+    # UptimeRobot / Cron ping rotası (Veritabanına gitmez, anında 200 döner)
+    path('healthz/', lambda r: HttpResponse('ok', content_type='text/plain')),
+
+    path('admin/', admin.site.urls),
+    path('sitemap.xml', sitemap_index, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.index'),
+    path('sitemap-<section>.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
+    path('venue/<slug:slug>/', VenueSSRView.as_view(), name='venue-ssr'),
+    path('category/<slug:slug>/', CategorySSRView.as_view(), name='category-ssr'),
+    path('api/v1/', include('apps.venues.urls')),
+    path('api/v1/', include('apps.categories.urls')),
+    path('api/v1/', include('apps.contributions.urls')),
+    path('api/v1/', include('apps.accounts.urls')),
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
