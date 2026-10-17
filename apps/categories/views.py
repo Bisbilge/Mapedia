@@ -7,6 +7,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 
 from rest_framework import viewsets, filters, permissions, status
+from rest_framework.views import APIView  # <-- EKSİK OLAN SATIR
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.contrib.auth.models import User
@@ -18,7 +19,6 @@ from .serializers import (
     CategoryCreateSerializer, FieldDefinitionSerializer,
     FieldChoiceSerializer
 )
-
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
