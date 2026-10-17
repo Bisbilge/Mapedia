@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import HttpResponse
 from django.contrib.sitemaps.views import sitemap, index as sitemap_index
 from apps.venues.sitemaps import VenueSitemap
 from apps.venues.views import VenueSSRView
@@ -16,6 +17,9 @@ sitemaps = {
 }
 
 urlpatterns = [
+    # UptimeRobot / Cron ping rotası (Veritabanına gitmez, anında 200 döner)
+    path('healthz/', lambda r: HttpResponse('ok', content_type='text/plain')),
+
     path('admin/', admin.site.urls),
     path('sitemap.xml', sitemap_index, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.index'),
     path('sitemap-<section>.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
