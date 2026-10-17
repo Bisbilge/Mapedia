@@ -1,31 +1,74 @@
 import json
-
 from django.http import Http404
 from django.shortcuts import render
 from django.views import View
+from django.db.models import Count, Q, Prefetch
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+
 from rest_framework import viewsets, filters, permissions, status
-from apps.venues.models import Venue
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.contrib.auth.models import User
+
+from apps.venues.models import Venue, VenueCategory, VenueRating
 from .models import Category, FieldDefinition, FieldChoice, CategoryFollow
 from .serializers import (
     CategoryListSerializer, CategoryDetailSerializer,
     CategoryCreateSerializer, FieldDefinitionSerializer,
     FieldChoiceSerializer
 )
-from django.contrib.auth.models import User
-from rest_framework.decorators import action
-from rest_framework.response import Response
 
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.filter(is_active=True)
     lookup_field = 'slug'
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
+
+    def get_queryset(self):
+        # 1. Onaylı ve aktif mekan ilişkilerini tek seferde sayan annotate
+        queryset = Category.objects.filter(is_active=True).select_related('owner').annotate(
+            annotated_venue_count=Count(
+                'venue_categories',
+                filter=Q(
+                    venue_categories__is_approved=True,
+                    venue_categories__venue__is_approved=True,
+                    venue_categories__venue__is_active=True
+                ),
+                distinct=True
+            )
+        )
+
+        # 2. Detay sayfası (retrieve) için alanları ve seçenekleri N+1 olmadan getir
+        if self.action in ['retrieve', 'update_category']:
+            choices_prefetch = Prefetch(
+                'choices',
+                queryset=FieldChoice.objects.filter(is_active=True).order_by('order')
+            )
+            fields_prefetch = Prefetch(
+                'field_definitions',
+                queryset=FieldDefinition.objects.filter(is_public=True)
+                                                .prefetch_related(choices_prefetch)
+                                                .order_by('order')
+            )
+            queryset = queryset.prefetch_related(fields_prefetch, 'moderators')
+
+        return queryset.order_by('name')
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return CategoryDetailSerializer
         return CategoryListSerializer
+
+    # 15 dakikalık liste önbelleği
+    @method_decorator(cache_page(60 * 15))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    # 15 dakikalık detay önbelleği
+    @method_decorator(cache_page(60 * 15))
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
 
     @action(detail=False, methods=['post'], url_path='create', permission_classes=[permissions.IsAuthenticated])
     def create_category(self, request):
@@ -114,7 +157,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         if not category.can_moderate(request.user):
             return Response({'detail': 'Forbidden.'}, status=403)
         
-        # Field verilerini al
         field_data = {
             'name': request.data.get('name'),
             'label': request.data.get('label'),
@@ -131,7 +173,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         
         field = serializer.save(category=category)
         
-        # Choice field ise choices'ları ekle
         if field.field_type in ('choice', 'multi_choice'):
             choices_data = request.data.get('choices', [])
             for choice_data in choices_data:
@@ -145,7 +186,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                         is_active=True
                     )
         
-        # Güncel field verisini döndür (choices dahil)
         return Response(FieldDefinitionSerializer(field).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['patch'], url_path='fields/(?P<field_id>[^/.]+)/edit', permission_classes=[permissions.IsAuthenticated])
@@ -161,7 +201,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         except FieldDefinition.DoesNotExist:
             return Response({'detail': 'Field not found.'}, status=404)
         
-        # Field güncelle (name ve field_type değiştirilemez)
         update_data = {}
         if 'label' in request.data:
             update_data['label'] = request.data['label']
@@ -179,7 +218,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         serializer.save()
         
-        # Choices güncelle (eğer gönderildiyse)
         if 'choices' in request.data and field.field_type in ('choice', 'multi_choice'):
             choices_data = request.data.get('choices', [])
             existing_choice_ids = set(field.choices.values_list('id', flat=True))
@@ -189,7 +227,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                 choice_id = choice_data.get('id')
                 
                 if choice_id and choice_id in existing_choice_ids:
-                    # Mevcut choice'ı güncelle
                     try:
                         choice = FieldChoice.objects.get(id=choice_id, field=field)
                         choice.label = choice_data.get('label', choice.label)
@@ -201,7 +238,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                     except FieldChoice.DoesNotExist:
                         pass
                 else:
-                    # Yeni choice ekle
                     if choice_data.get('value') and choice_data.get('label'):
                         new_choice = FieldChoice.objects.create(
                             field=field,
@@ -213,7 +249,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                         )
                         updated_choice_ids.add(new_choice.id)
             
-            # Gönderilmeyen choice'ları deaktive et
             field.choices.exclude(id__in=updated_choice_ids).update(is_active=False)
         
         return Response(FieldDefinitionSerializer(field).data)
@@ -230,14 +265,13 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
             field = FieldDefinition.objects.get(pk=field_id, category=category)
         except FieldDefinition.DoesNotExist:
             return Response({'detail': 'Field not found.'}, status=404)
-        field.delete()  # Cascade ile choices da silinir
+        field.delete()
         return Response({'detail': 'Deleted.'}, status=status.HTTP_204_NO_CONTENT)
 
     # --- FIELD CHOICES YÖNETİMİ ---
 
     @action(detail=True, methods=['get'], url_path='fields/(?P<field_id>[^/.]+)/choices', permission_classes=[permissions.IsAuthenticated])
     def get_choices(self, request, slug=None, field_id=None):
-        """Bir field'ın tüm aktif choice'larını listele"""
         try:
             category = Category.objects.get(slug=slug)
         except Category.DoesNotExist:
@@ -257,7 +291,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['put'], url_path='fields/(?P<field_id>[^/.]+)/choices/update', permission_classes=[permissions.IsAuthenticated])
     def update_choices(self, request, slug=None, field_id=None):
-        """Bir field'ın choice'larını toplu güncelle"""
         try:
             category = Category.objects.get(slug=slug)
         except Category.DoesNotExist:
@@ -274,12 +307,10 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         
         choices_data = request.data.get('choices', [])
         
-        # Validasyon
         valid_choices = [c for c in choices_data if c.get('value') and c.get('label') and c.get('is_active', True)]
         if len(valid_choices) < 2:
             return Response({'detail': 'At least 2 active choices are required.'}, status=400)
         
-        # Duplicate value kontrolü
         values = [c['value'].strip().lower() for c in valid_choices]
         if len(set(values)) != len(values):
             return Response({'detail': 'Choice values must be unique.'}, status=400)
@@ -292,7 +323,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
             is_active = choice_data.get('is_active', True)
             
             if choice_id and choice_id in existing_choice_ids:
-                # Mevcut choice güncelle
                 try:
                     choice = FieldChoice.objects.get(id=choice_id, field=field)
                     choice.label = choice_data.get('label', choice.label)
@@ -304,7 +334,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                 except FieldChoice.DoesNotExist:
                     pass
             elif choice_data.get('value') and choice_data.get('label') and is_active:
-                # Yeni choice ekle
                 new_choice = FieldChoice.objects.create(
                     field=field,
                     value=choice_data['value'].strip(),
@@ -315,10 +344,8 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
                 )
                 updated_choice_ids.add(new_choice.id)
         
-        # Güncellenmeyen mevcut choice'ları deaktive et
         field.choices.filter(id__in=existing_choice_ids - updated_choice_ids).update(is_active=False)
         
-        # Güncel listeyi döndür
         choices = field.choices.filter(is_active=True).order_by('order')
         return Response(FieldChoiceSerializer(choices, many=True).data)
 
@@ -346,9 +373,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         return Response({'following': True, 'follower_count': category.followers.count()})
 
 
-from rest_framework.views import APIView
-from apps.venues.models import VenueCategory
-
 class FeedView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -368,11 +392,6 @@ class FeedView(APIView):
             is_approved=True,
         ).values_list('venue_id', flat=True).distinct()
 
-        from apps.venues.models import Venue
-        from django.db.models import Prefetch
-        from apps.categories.models import FieldValue
-
-        from apps.venues.models import VenueRating
         venues = Venue.objects.filter(
             id__in=venue_ids,
             is_approved=True,
@@ -388,12 +407,10 @@ class FeedView(APIView):
 
         total = venues.count()
         start = (page - 1) * page_size
-        page_venues = venues[start:start + page_size]
-
-        page_venues = list(page_venues)
+        page_venues = list(venues[start:start + page_size])
         page_venue_ids = [v.id for v in page_venues]
 
-        # Fetch up to 2 recent comments per venue in one query
+        # 2 yorum per venue tek sorguda
         from collections import defaultdict
         comments_qs = VenueRating.objects.filter(
             venue_id__in=page_venue_ids,
@@ -444,7 +461,7 @@ class FeedView(APIView):
         return Response({
             'results': results,
             'has_more': (start + page_size) < total,
-            'followed_count': len(followed_category_ids),  # already a list
+            'followed_count': len(followed_category_ids),
         })
 
 
