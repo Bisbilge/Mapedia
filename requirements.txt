@@ -12,5 +12,6 @@ python-decouple==3.8
 sqlparse==0.5.5
 google-auth==2.38.0
 sentry-sdk
+redis
 gunicorn
 whitenoise
