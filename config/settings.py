@@ -3,21 +3,20 @@ Django settings for Mapedia project.
 """
 
 import os
-import sentry_sdk
 from pathlib import Path
 from decouple import config
+import dj_database_url
+import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
 
 # ── SENTRY INITIALIZATION ──────────────────────────────────────
-# Hataları yakalamak için en üstte başlaması en sağlıklıdır.
 sentry_sdk.init(
     dsn=config('SENTRY_DSN', default=''),
     integrations=[
         DjangoIntegration(),
         RedisIntegration(),
     ],
-    # Debug modunda her şeyi izle, canlıda %20 örnekleme yap (kota dostu)
     traces_sample_rate=1.0 if config('DEBUG', default=False, cast=bool) else 0.2,
     send_default_pii=True,
 )
@@ -27,8 +26,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me')
 GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
-CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='').split(',')
+ALLOWED_HOSTS = [host.strip() for host in config('ALLOWED_HOSTS', default='*').split(',') if host.strip()]
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in config('CSRF_TRUSTED_ORIGINS', default='https://mapedia.org,https://www.mapedia.org').split(',') if origin.strip()]
+
 # Capacitor mobile app
 if 'https://localhost' not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append('https://localhost')
@@ -71,7 +71,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # Axes Middleware auth'tan hemen sonra olmalı
     'axes.middleware.AxesMiddleware',
 ]
 
@@ -95,16 +94,30 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # ── DATABASE ───────────────────────────────────────────────────
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='librespot'),
-        'USER': config('DB_USER', default='librespot'),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True
+        )
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': config('DB_NAME', default='librespot'),
+            'USER': config('DB_USER', default='librespot'),
+            'PASSWORD': config('DB_PASSWORD', default=''),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+            'OPTIONS': {
+                'sslmode': 'require' if config('DB_HOST', default='localhost') != 'localhost' else 'prefer',
+            },
+        }
+    }
 
 # ── AUTHENTICATION ─────────────────────────────────────────────
 AUTHENTICATION_BACKENDS = [
@@ -141,10 +154,12 @@ REST_FRAMEWORK = {
     ],
 }
 
-CORS_ALLOWED_ORIGINS = config(
-    'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:5173'
-).split(',')
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in config(
+        'CORS_ALLOWED_ORIGINS',
+        default='http://localhost:5173,https://mapedia.org,https://www.mapedia.org'
+    ).split(',') if origin.strip()
+]
 
 # Capacitor Android/iOS app origin (always allowed)
 if 'https://localhost' not in CORS_ALLOWED_ORIGINS:
@@ -159,16 +174,26 @@ ANYMAIL = {
     'RESEND_API_KEY': config('RESEND_API_KEY', default=''),
 }
 
-# ── CACHE (Redis) ──────────────────────────────────────────────
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+# ── CACHE (Redis or Fallback to Memory) ─────────────────────────
+REDIS_URL = config('REDIS_URL', default=None)
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            }
         }
     }
-}
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "unique-snowflake",
+        }
+    }
 
 # ── RATE LIMIT ─────────────────────────────────────────────────
 RATELIMIT_EXCEPTION_CLASS = 'django_ratelimit.exceptions.Ratelimited'
@@ -185,11 +210,9 @@ AXES_IPWARE_META_PRECEDENCE_ORDER = [
     'HTTP_X_FORWARDED_FOR',
     'REMOTE_ADDR',
 ]
-# Cloudflare + nginx = 1 trusted proxy; take leftmost (real user) IP
 AXES_PROXY_COUNT = 1
 
 # ── LOGGING ────────────────────────────────────────────────────
-# Sentry entegrasyonu için INFO seviyesi idealdir.
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -217,9 +240,7 @@ LOGGING = {
 }
 
 # ── SECURITY (HTTPS / HSTS) ────────────────────────────────────
-# Cloudflare HTTPS'i sonlandırır; proxy başlığını güven.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-# HSTS — tarayıcıya 1 yıl boyunca yalnızca HTTPS kullan der.
 SECURE_HSTS_SECONDS = 31_536_000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
@@ -227,5 +248,4 @@ SECURE_HSTS_PRELOAD = True
 SITE_ID = 1
 
 # ── VITE FRONTEND ──────────────────────────────────────────────
-# dist/index.html'den asset taglerini okumak için kullanılır.
 VITE_DIST_DIR = config('VITE_DIST_DIR', default=str(BASE_DIR.parent.parent / 'frontend' / 'dist'))
