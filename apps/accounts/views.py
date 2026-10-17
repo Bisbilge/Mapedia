@@ -1,5 +1,6 @@
 # apps/users/views.py
 
+import logging
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
@@ -18,16 +19,31 @@ from .models import EmailVerificationToken, UserProfile
 from apps.contributions.models import Contribution
 from apps.venues.models import Venue, VenueContributor, VenueRating
 
+logger = logging.getLogger(__name__)
 
-@method_decorator(ratelimit(key='ip', rate='5/h', method='POST', block=True), name='post')
+
+def get_client_ip(group, request):
+    """
+    Cloudflare ve Render arkasındaki tekil gerçek istemci IP'sini döner.
+    """
+    cf_ip = request.META.get('HTTP_CF_CONNECTING_IP')
+    if cf_ip:
+        return cf_ip.strip()
+
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+
+    return request.META.get('REMOTE_ADDR')
+
+
+@method_decorator(ratelimit(key=get_client_ip, rate='5/h', method='POST', block=True), name='post')
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
     def perform_create(self, serializer):
-        import logging
-        logger = logging.getLogger(__name__)
         user = serializer.save()
         token_obj = EmailVerificationToken.objects.create(user=user)
         verify_url = f"https://mapedia.org/verify-email?token={token_obj.token}"
@@ -49,7 +65,7 @@ class RegisterView(generics.CreateAPIView):
             logger.exception("Verification email failed for user %s", user.username)
 
 
-@method_decorator(ratelimit(key='ip', rate='10/h', method='GET', block=True), name='get')
+@method_decorator(ratelimit(key=get_client_ip, rate='10/h', method='GET', block=True), name='get')
 class VerifyEmailView(APIView):
     permission_classes = [permissions.AllowAny]
 
