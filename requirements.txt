@@ -17,3 +17,6 @@ gunicorn
 whitenoise
 django-extensions
 django-axes
+django-anymail
+dj-database-url
+requests
